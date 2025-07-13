@@ -39,7 +39,7 @@ def create_table():
     if not inspect(engine).has_table('users_churn'):
         metadata.create_all(engine)
 
-def extract():
+def extract(**kwargs):
     hook = PostgresHook('source_db')
     conn = hook.get_conn()
     sql = """
@@ -57,14 +57,22 @@ def extract():
     """
     df = pd.read_sql(sql, conn)
     conn.close()
+    kwargs['ti'].xcom_push(key='data', value=df.to_json())  # XCom push
     return df
 
-def transform():
+def transform(**kwargs):
+    ti = kwargs['ti']
+    data_json = ti.xcom_pull(key='data', task_ids='extract')
+    df = pd.read_json(data_json)
     df['target'] = (df['end_date'] != 'No').astype(int)
     df['end_date'] = df['end_date'].replace('No', pd.NaT)
+    ti.xcom_push(key='transformed_data', value=df.to_json())  # XCom push
     return df
 
-def load():
+def load(**kwargs):
+    ti = kwargs['ti']
+    data_json = ti.xcom_pull(key='transformed_data', task_ids='transform')
+    df = pd.read_json(data_json)
     hook = PostgresHook('destination_db')
     engine = hook.get_sqlalchemy_engine()
     df.to_sql(
