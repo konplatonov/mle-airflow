@@ -15,7 +15,10 @@ with DAG(
     tags=["ETL"]
 ) as dag:
 
-    create_table()
+    create_step = PythonOperator(
+        task_id='create_table',
+        python_callable=create_table
+    )
 
     extract_step = PythonOperator(
         task_id='extract',
@@ -32,4 +35,4 @@ with DAG(
         python_callable=load
     )
 
-    extract_step >> transform_step >> load_step
+    create_table >> extract_step >> transform_step >> load_step
