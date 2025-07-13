@@ -59,12 +59,12 @@ def extract():
     conn.close()
     return df
 
-def transform(df: pd.DataFrame):
+def transform():
     df['target'] = (df['end_date'] != 'No').astype(int)
     df['end_date'] = df['end_date'].replace('No', pd.NaT)
     return df
 
-def load(df: pd.DataFrame):
+def load():
     hook = PostgresHook('destination_db')
     engine = hook.get_sqlalchemy_engine()
     df.to_sql(
