@@ -1,7 +1,7 @@
 from airflow.operators.python import PythonOperator
 from airflow import DAG
 import pendulum
-from steps.churn import create_table, extract, transform, load
+from steps.churn_steps import create_table, extract, transform, load
 from steps.messages import send_telegram_success_message, send_telegram_failure_message
 
 with DAG(
