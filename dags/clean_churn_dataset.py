@@ -1,29 +1,25 @@
-# dags/churn.py
+# dags/clean_churn.py
 import pendulum
 from airflow.decorators import dag, task
 
 @dag(
-    dag_id="prepare_churn_dataset",
     schedule='@once',
     start_date=pendulum.datetime(2023, 1, 1, tz="UTC"),
-    catchup=False,
     tags=["ETL"]
 )
-
-def prepare_churn_dataset():
+def clean_churn_dataset():
     import pandas as pd
     import numpy as np
     from airflow.providers.postgres.hooks.postgres import PostgresHook
-
     @task()
     def create_table():
-        from sqlalchemy import Table, MetaData, Column, Integer, String, DateTime, Float, UniqueConstraint, inspect
+        from sqlalchemy import Table, Column, DateTime, Float, Integer, Index, MetaData, String, UniqueConstraint, inspect
         hook = PostgresHook('destination_db')
-        engine = hook.get_sqlalchemy_engine()
+        db_engine = hook.get_sqlalchemy_engine()
+
         metadata = MetaData()
-        users_churn = Table(
-            'users_churn',
-            metadata,
+
+        churn_table = Table('clean_users_churn', metadata,
             Column('id', Integer, primary_key=True, autoincrement=True),
             Column('customer_id', String),
             Column('begin_date', DateTime),
@@ -46,13 +42,12 @@ def prepare_churn_dataset():
             Column('dependents', String),
             Column('multiple_lines', String),
             Column('target', Integer),
-            UniqueConstraint('customer_id', name='uq_customer_id')
+            UniqueConstraint('customer_id', name='unique_clean_customer_constraint')
         )
-        if not inspect(engine).has_table('users_churn'):
-            metadata.create_all(engine)
-
+        if not inspect(db_engine).has_table(churn_table.name):
+            metadata.create_all(db_engine)
     @task()
-    def extract(**kwargs):
+    def extract():
         hook = PostgresHook('source_db')
         conn = hook.get_conn()
         sql = f"""
@@ -66,7 +61,7 @@ def prepare_churn_dataset():
         left join personal as p on p.customer_id = c.customer_id
         left join phone as ph on ph.customer_id = c.customer_id
         """
-        data = pd.read_sql(sql, conn)
+        data = pd.read_sql(sql, conn)#.drop(columns=['id'])
         conn.close()
         return data
 
@@ -74,21 +69,37 @@ def prepare_churn_dataset():
     def transform(data: pd.DataFrame):
         data['target'] = (data['end_date'] != 'No').astype(int)
         data['end_date'].replace({'No': None}, inplace=True)
+
+        feature_cols = data.columns.drop('customer_id').tolist()
+        is_duplicated_features = data.duplicated(subset=feature_cols, keep=False)
+        data = data[~is_duplicated_features].reset_index(drop=True)
+        
+        cols_with_nans = data.isnull().sum()
+        cols_with_nans = cols_with_nans[cols_with_nans > 0].index.drop('end_date')
+        for col in cols_with_nans:
+            if data[col].dtype in [float, int]:
+                fill_value = data[col].mean()
+            elif data[col].dtype == 'object':
+                fill_value = data[col].mode().iloc[0]
+            data[col] = data[col].fillna(fill_value)
+        
         return data
 
     @task()
     def load(data: pd.DataFrame):
         hook = PostgresHook('destination_db')
+        data['end_date'] = data['end_date'].astype('object').replace(np.nan, None)
         hook.insert_rows(
-            table="users_churn",
+            table='clean_users_churn',
             replace=True,
             target_fields=data.columns.tolist(),
             replace_index=['customer_id'],
             rows=data.values.tolist()
     )
-
+    
     create_table()
     data = extract()
     transformed_data = transform(data)
     load(transformed_data)
-prepare_churn_dataset()
+
+clean_churn_dataset()
