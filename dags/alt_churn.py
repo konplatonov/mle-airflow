@@ -1,9 +1,8 @@
-# dags/alt_churn.py
-from airflow import DAG
 from airflow.operators.python import PythonOperator
+from airflow import DAG
+import pendulum
 from steps.churn import create_table, extract, transform, load
 from steps.messages import send_telegram_success_message, send_telegram_failure_message
-import pendulum
 
 with DAG(
     dag_id='prepare_alt_churn_dataset',
@@ -15,24 +14,24 @@ with DAG(
     tags=["ETL"]
 ) as dag:
 
-    create_step = PythonOperator(
+    create_table_task = PythonOperator(
         task_id='create_table',
         python_callable=create_table
     )
 
-    extract_step = PythonOperator(
+    extract_task = PythonOperator(
         task_id='extract',
         python_callable=extract
     )
 
-    transform_step = PythonOperator(
+    transform_task = PythonOperator(
         task_id='transform',
         python_callable=transform
     )
 
-    load_step = PythonOperator(
+    load_task = PythonOperator(
         task_id='load',
         python_callable=load
     )
 
-    create_table >> extract_step >> transform_step >> load_step
+    create_table_task >> extract_task >> transform_task >> load_task
